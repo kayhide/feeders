@@ -8,36 +8,34 @@ import Control.Monad.Trans.State.Strict
 import Data.Bifunctor
 import Data.Functor.Sum
 import Data.Type.Equality
+import Control.Monad.Skeleton
 
 -- | Monadic consumer
-data Eater s m a = Await (Maybe s -> Eater s m a)
-    | Leftover s (Eater s m a)
-    | Lift (m (Eater s m a))
-    | Pure a
 
-instance MonadTrans (Eater s) where
-  lift = Lift . fmap Pure
+data Phage s m x where
+  Await :: Phage s m (Maybe s)
+  Leftover :: s -> Phage s m ()
+  Lift :: m a -> Phage s m a
 
-instance Monad m => Functor (Eater s m) where
-  fmap = liftM
+type Eater s m = Skeleton (Phage s m)
 
-instance Monad m => Applicative (Eater s m) where
-  pure = return
-  (<*>) = ap
+leftover :: s -> Eater s m ()
+leftover = bone . Leftover
 
-instance Monad m => Monad (Eater s m) where
-  return = Pure
-  Pure a >>= k = k a
-  Await f >>= k = Await ((>>= k) . f)
-  Lift m >>= k = Lift $ fmap (>>=k) m
-  Leftover s c >>= k = Leftover s (c >>= k)
+await :: Eater s m (Maybe s)
+await = bone Await
+{-# INLINE await #-}
+
+liftP :: m a -> Eater s m a
+liftP = bone . Lift
+{-# INLINE liftP #-}
 
 killEater :: Monad m => Eater s m a -> m a
-killEater = \case
-  Pure a -> return a
-  Await k -> killEater $ k Nothing
-  Leftover _ k -> killEater k
-  Lift m -> m >>= killEater
+killEater m = case debone m of
+  Return a -> return a
+  Await :>>= k -> killEater $ k Nothing
+  Leftover _ :>>= k -> killEater $ k ()
+  Lift m :>>= k -> m >>= killEater . k
 
 -- | Monadic producer
 newtype Feeder s n m a = Feeder { unFeeder :: forall x r. Eater s n x -> (a -> Eater s n x -> m r) -> m r }
@@ -58,20 +56,31 @@ instance Monad (Feeder s n m) where
 instance MonadTrans (Feeder s n) where
   lift m = Feeder $ \s k -> m >>= \a -> k a s
 
-yieldOn :: Monad m => (forall x. n x -> m x) -> s -> Feeder s n m ()
-yieldOn t s = Feeder $ \e cont -> case e of
-  Pure a -> cont () $ Leftover s (Pure a)
-  Await k -> cont () $ k (Just s)
-  Leftover s c -> unFeeder (yieldOn t s) c cont
-  Lift m -> t m >>= \c -> unFeeder (yieldOn t s) c cont
+yieldOn :: forall s n m. Monad m => (forall x. n x -> m x) -> s -> Feeder s n m ()
+yieldOn t s = Feeder $ \e cont -> go e >>= cont () where
+  go :: Eater s n x -> m (Eater s n x)
+  go e = case debone e of
+    Return a -> return $ a <$ leftover s
+    Await :>>= k -> return $ k (Just s)
+    Leftover s' :>>= k -> return $ leftover s >> e
+    Lift m :>>= k -> t m >>= go . k
+{-# INLINE yieldOn #-}
 
 yield :: Monad m => s -> Feeder s m m ()
 yield = yieldOn id
-{-# INLINE yieldOn #-}
+{-# INLINE yield #-}
 
-await :: Eater s m (Maybe s)
-await = Await Pure
-{-# INLINE await #-}
+
+yieldMany :: forall s m. Monad m => [s] -> Feeder s m m ()
+yieldMany xs0 = Feeder $ \e cont -> go xs0 e >>= cont () where
+  go :: [s] -> Eater s m x -> m (Eater s m x)
+  go [] e = return e
+  go (x : xs) e = case debone e of
+    Return a -> return $ a <$ mapM_ leftover (x : xs)
+    Await :>>= k -> go xs $ k (Just x)
+    Leftover s' :>>= k -> return $ leftover x >> e
+    Lift m :>>= k -> m >>= go (x : xs) . k
+
 
 sinkNull :: Monad m => Eater s m ()
 sinkNull = await >>= maybe (return ()) (const sinkNull)
@@ -91,10 +100,10 @@ scan f b = lift await >>= \case
   Nothing -> return ()
   Just a -> do
     let !b' = f b a
-    yieldOn lift b'
+    yieldOn liftP b'
     scan f b'
 
 (>-$) :: Monad m => Rancher a b m x -> Eater b m r -> Eater a m r
 r >-$ e = do
   (a, e') <- feed r e
-  lift $ killEater e'
+  liftP $ killEater e'

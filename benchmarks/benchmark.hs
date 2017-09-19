@@ -19,7 +19,7 @@ drainC :: C.Conduit Int Identity a -> ()
 drainC c = runIdentity $ (sourceC C.$= c) C.$$ C.sinkNull
 
 drainF :: F.Rancher Int a Identity () -> ()
-drainF h = fst $ runIdentity $ F.feed sourceF $ h F.>-$ F.sinkNull
+drainF h = runIdentity $ F.killEater $ snd $ runIdentity $ F.feed sourceF $ h F.>-$ F.sinkNull
 
 value :: Int
 value = 1000
@@ -29,7 +29,7 @@ sourceC = C.enumFromTo 1 value
 sourceP = P.each [1..value]
 
 sourceF :: Monad m => F.Feeder Int m m ()
-sourceF = mapM_ F.yield [1..value]
+sourceF = F.yieldMany [1..value]
 
 main = defaultMain
   [ bgroup "scan"

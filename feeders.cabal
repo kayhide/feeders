@@ -16,6 +16,7 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:     Data.Feeder
+  ghc-options:    -Wall
   build-depends:       base >= 4.7 && < 5, transformers, monad-skeleton
   default-language:    Haskell2010
 
