@@ -8,7 +8,10 @@ import qualified Data.Machine      as M
 import qualified Data.Iteratee.Iteratee as I
 import qualified Pipes             as P
 import qualified Pipes.Prelude     as P
+import qualified Data.Boombox as B
+import qualified Data.Boombox.Tap as B
 import Data.Functor.Identity
+import Control.Monad
 import Criterion.Main
 import Data.List
 
@@ -30,6 +33,9 @@ drainF h = runIdentity $ F.killEater $ snd $ runIdentity $ F.feed sourceF $ h F.
 drainI :: I.Nullable a => I.Enumeratee Int a Identity () -> ()
 drainI h = runIdentity $ I.run $ runIdentity $ I.run $ runIdentity $ sourceI $ h $ I.mapChunksM_ $ const $ return ()
 
+drainB :: B.Recorder Identity Identity Maybe Int a -> ()
+drainB h = maybe () (\(_,_,r) -> r) $ sourceB B.@.$ h B.>-$ forever B.await
+
 instance I.NullPoint Int where
   empty = 0
 
@@ -37,7 +43,7 @@ instance I.Nullable Int where
   nullC = (==0)
 
 value :: Int
-value = 1000
+value = 10000
 
 sourceM = M.enumerateFromTo 1 value
 sourceC = C.enumFromTo 1 value
@@ -52,9 +58,17 @@ sourceF = F.yieldMany [1..value]
 sourceI :: I.Enumerator Int Identity a
 sourceI = I.enumList [1..value]
 
+sourceB :: B.Tape Identity Maybe Int
+sourceB = B.tap [1..value]
+
+scanB :: (b -> a -> b) -> b -> B.Recorder Identity Identity m a b
+scanB f = go where
+  go b = B.Tape $ B.await >>= \x -> let !b' = f b x in return (b', pure $ go b')
+
 main = defaultMain
   [ bgroup "scan"
-      [ bench "feeders" $ whnf drainF (F.scan (+) 0)
+      [ bench "boombox" $ whnf drainB (scanB (+) 0)
+      , bench "feeders" $ whnf drainF (F.scan (+) 0)
       , bench "predators" $ whnf drainPd (Pd.scan (+) 0)
       , bench "iteratee" $ whnf drainI (I.unfoldConvStream (\x -> I.liftI $ \case
         I.Chunk i -> let !r = x + i in return (r, r)
