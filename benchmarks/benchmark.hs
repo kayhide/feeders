@@ -1,9 +1,11 @@
+{-# LANGUAGE BangPatterns, LambdaCase #-}
 import qualified Data.Conduit      as C
 import qualified Data.Conduit.List as C
 import qualified Data.Conduit.Combinators as CC
 import qualified Data.Feeder       as F
 import qualified Data.Predator       as Pd
 import qualified Data.Machine      as M
+import qualified Data.Iteratee.Iteratee as I
 import qualified Pipes             as P
 import qualified Pipes.Prelude     as P
 import Data.Functor.Identity
@@ -25,6 +27,15 @@ drainPd h = fst $ runIdentity $ Pd.prey Pd.sinkNull $ sourcePd Pd.@-> h
 drainF :: F.Rancher Int a Identity () -> ()
 drainF h = runIdentity $ F.killEater $ snd $ runIdentity $ F.feed sourceF $ h F.>-$ F.sinkNull
 
+drainI :: I.Nullable a => I.Enumeratee Int a Identity () -> ()
+drainI h = runIdentity $ I.run $ runIdentity $ I.run $ runIdentity $ sourceI $ h $ I.mapChunksM_ $ const $ return ()
+
+instance I.NullPoint Int where
+  empty = 0
+
+instance I.Nullable Int where
+  nullC = (==0)
+
 value :: Int
 value = 1000
 
@@ -38,10 +49,16 @@ sourcePd = Pd.yieldMany [1..value]
 sourceF :: F.Feeder Int Identity Identity ()
 sourceF = F.yieldMany [1..value]
 
+sourceI :: I.Enumerator Int Identity a
+sourceI = I.enumList [1..value]
+
 main = defaultMain
   [ bgroup "scan"
       [ bench "feeders" $ whnf drainF (F.scan (+) 0)
       , bench "predators" $ whnf drainPd (Pd.scan (+) 0)
+      , bench "iteratee" $ whnf drainI (I.unfoldConvStream (\x -> I.liftI $ \case
+        I.Chunk i -> let !r = x + i in return (r, r)
+        I.EOF _ -> return (x, x)) 0)
       , bench "machines" $ whnf drainM (M.scan (+) 0)
       , bench "pipes" $ whnf drainP (P.scan (+) 0 id)
       , bench "conduit" $ whnf drainC (CC.scanl (+) 0)
