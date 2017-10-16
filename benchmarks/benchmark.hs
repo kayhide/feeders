@@ -12,7 +12,9 @@ import qualified Data.Boombox as B
 import qualified Data.Boombox.Tap as B
 import qualified Streaming.Prelude as S
 import qualified Tubes as T
+import qualified Control.Arrow.Machine as Mc
 import Data.Functor.Identity
+import Control.Arrow
 import Control.Monad
 import Criterion.Main
 import Data.List
@@ -43,6 +45,9 @@ drainS h = runIdentity $ S.effects $ h sourceS
 
 drainT :: T.Tube Int a Identity () -> ()
 drainT h = runIdentity $ T.runTube $ sourceT T.>< h T.>< T.stop
+
+drainMc :: Mc.ProcessA (->) (Mc.Event Int) a -> ()
+drainMc h = Mc.run_ (h >>> arr (const Mc.noEvent)) [1..value]
 
 instance I.NullPoint Int where
   empty = 0
@@ -86,6 +91,7 @@ scanT f = go where
 main = defaultMain
   [ bgroup "scan"
       [ bench "boombox" $ whnf drainB (scanB (+) 0)
+      , bench "machinecell" $ whnf drainMc (Mc.evMap (+) >>> Mc.accum 0)
       , bench "streaming" $ whnf drainS (S.scan (+) 0 id)
       , bench "tubes" $ whnf drainT (scanT (+) 0)
       , bench "feeders" $ whnf drainF (F.scan (+) 0)
