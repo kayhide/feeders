@@ -11,6 +11,7 @@ import qualified Pipes.Prelude     as P
 import qualified Data.Boombox as B
 import qualified Data.Boombox.Tap as B
 import qualified Streaming.Prelude as S
+import qualified Tubes as T
 import Data.Functor.Identity
 import Control.Monad
 import Criterion.Main
@@ -40,6 +41,9 @@ drainB h = maybe () (\(_,_,r) -> r) $ sourceB B.@.$ h B.>-$ forever B.await
 drainS :: (S.Stream (S.Of Int) Identity () -> S.Stream (S.Of a) Identity ()) -> ()
 drainS h = runIdentity $ S.effects $ h sourceS
 
+drainT :: T.Tube Int a Identity () -> ()
+drainT h = runIdentity $ T.runTube $ sourceT T.>< h T.>< T.stop
+
 instance I.NullPoint Int where
   empty = 0
 
@@ -68,14 +72,22 @@ sourceB = B.tap [1..value]
 sourceS :: Monad m => S.Stream (S.Of Int) m ()
 sourceS = S.each [1..value]
 
+sourceT :: Monad m => T.Tube () Int m ()
+sourceT = T.each [1..value]
+
 scanB :: (b -> a -> b) -> b -> B.Recorder Identity Identity m a b
 scanB f = go where
   go b = B.Tape $ B.await >>= \x -> let !b' = f b x in return (b', pure $ go b')
+
+scanT :: Monad m => (b -> a -> b) -> b -> T.Tube a b m x
+scanT f = go where
+  go b = T.await >>= \x -> let !b' = f b x in T.yield b' >> go b'
 
 main = defaultMain
   [ bgroup "scan"
       [ bench "boombox" $ whnf drainB (scanB (+) 0)
       , bench "streaming" $ whnf drainS (S.scan (+) 0 id)
+      , bench "tubes" $ whnf drainT (scanT (+) 0)
       , bench "feeders" $ whnf drainF (F.scan (+) 0)
       , bench "predators" $ whnf drainPd (Pd.scan (+) 0)
       , bench "iteratee" $ whnf drainI (I.unfoldConvStream (\x -> I.liftI $ \case
