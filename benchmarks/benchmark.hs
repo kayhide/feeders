@@ -10,6 +10,7 @@ import qualified Pipes             as P
 import qualified Pipes.Prelude     as P
 import qualified Data.Boombox as B
 import qualified Data.Boombox.Tap as B
+import qualified Streaming.Prelude as S
 import Data.Functor.Identity
 import Control.Monad
 import Criterion.Main
@@ -36,6 +37,9 @@ drainI h = runIdentity $ I.run $ runIdentity $ I.run $ runIdentity $ sourceI $ h
 drainB :: B.Recorder Identity Identity Maybe Int a -> ()
 drainB h = maybe () (\(_,_,r) -> r) $ sourceB B.@.$ h B.>-$ forever B.await
 
+drainS :: (S.Stream (S.Of Int) Identity () -> S.Stream (S.Of a) Identity ()) -> ()
+drainS h = runIdentity $ S.effects $ h sourceS
+
 instance I.NullPoint Int where
   empty = 0
 
@@ -61,6 +65,9 @@ sourceI = I.enumList [1..value]
 sourceB :: B.Tape Identity Maybe Int
 sourceB = B.tap [1..value]
 
+sourceS :: Monad m => S.Stream (S.Of Int) m ()
+sourceS = S.each [1..value]
+
 scanB :: (b -> a -> b) -> b -> B.Recorder Identity Identity m a b
 scanB f = go where
   go b = B.Tape $ B.await >>= \x -> let !b' = f b x in return (b', pure $ go b')
@@ -68,6 +75,7 @@ scanB f = go where
 main = defaultMain
   [ bgroup "scan"
       [ bench "boombox" $ whnf drainB (scanB (+) 0)
+      , bench "streaming" $ whnf drainS (S.scan (+) 0 id)
       , bench "feeders" $ whnf drainF (F.scan (+) 0)
       , bench "predators" $ whnf drainPd (Pd.scan (+) 0)
       , bench "iteratee" $ whnf drainI (I.unfoldConvStream (\x -> I.liftI $ \case

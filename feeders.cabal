@@ -24,7 +24,17 @@ benchmark benchmark
   main-is:        benchmark.hs
   ghc-options:    -O2
   hs-source-dirs: benchmarks
-  build-depends: base, criterion, pipes, machines, conduit, conduit-combinators, feeders, iteratee, boombox
+  build-depends: base
+    , criterion
+    , pipes
+    , machines
+    , conduit
+    , conduit-combinators
+    , feeders
+    , iteratee
+    , boombox
+    , tubes
+    , streaming
   default-language:    Haskell2010
 
 source-repository head
