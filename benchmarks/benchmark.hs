@@ -29,8 +29,8 @@ drainP p = runIdentity $ P.runEffect $ P.for (sourceP P.>-> p) P.discard
 drainC :: C.Conduit Int Identity a -> ()
 drainC c = runIdentity $ (sourceC C.$= c) C.$$ C.sinkNull
 
-drainPd :: Pd.Heterotroph Int a Identity () -> ()
-drainPd h = fst $ runIdentity $ Pd.prey Pd.sinkNull $ sourcePd Pd.@-> h
+drainPd :: Pd.Heterotroph Int Int Identity () -> ()
+drainPd h = maybe () fst $ runIdentity $ Pd.prey Pd.sinkNull $ sourcePd Pd.@-> h
 
 drainF :: F.Rancher Int a Identity () -> ()
 drainF h = runIdentity $ F.killEater $ snd $ runIdentity $ F.feed sourceF $ h F.>-$ F.sinkNull
