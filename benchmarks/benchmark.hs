@@ -6,6 +6,7 @@ import qualified Data.Feeder       as F
 import qualified Data.Predator       as Pd
 import qualified Data.Machine      as M
 import qualified Data.Iteratee.Iteratee as I
+import qualified Data.Iteratee.ListLike as I
 import qualified Pipes             as P
 import qualified Pipes.Prelude     as P
 import qualified Data.Boombox as B
@@ -22,7 +23,7 @@ import Data.List
 drainM :: M.ProcessT Identity Int o -> ()
 drainM m = runIdentity $ M.runT_ (sourceM M.~> m)
 
-drainP :: P.Proxy () Int () a Identity () -> ()
+drainP :: P.Pipe Int a Identity () -> ()
 drainP p = runIdentity $ P.runEffect $ P.for (sourceP P.>-> p) P.discard
 
 drainC :: C.Conduit Int Identity a -> ()
@@ -34,8 +35,8 @@ drainPd h = fst $ runIdentity $ Pd.prey Pd.sinkNull $ sourcePd Pd.@-> h
 drainF :: F.Rancher Int a Identity () -> ()
 drainF h = runIdentity $ F.killEater $ snd $ runIdentity $ F.feed sourceF $ h F.>-$ F.sinkNull
 
-drainI :: I.Nullable a => I.Enumeratee Int a Identity () -> ()
-drainI h = runIdentity $ I.run $ runIdentity $ I.run $ runIdentity $ sourceI $ h $ I.mapChunksM_ $ const $ return ()
+drainI :: I.Enumeratee [Int] [a] Identity () -> ()
+drainI h = runIdentity $ I.run $ runIdentity $ I.run $ runIdentity $ sourceI $ h $ I.mapM_ $ const $ return ()
 
 drainB :: B.Recorder Identity Identity Maybe Int a -> ()
 drainB h = maybe () (\(_,_,r) -> r) $ sourceB B.@.$ h B.>-$ forever B.await
@@ -48,12 +49,6 @@ drainT h = runIdentity $ T.runTube $ sourceT T.>< h T.>< T.stop
 
 drainMc :: Mc.ProcessA (->) (Mc.Event Int) a -> ()
 drainMc h = Mc.run_ (h >>> arr (const Mc.noEvent)) [1..value]
-
-instance I.NullPoint Int where
-  empty = 0
-
-instance I.Nullable Int where
-  nullC = (==0)
 
 value :: Int
 value = 10000
@@ -68,8 +63,8 @@ sourcePd = Pd.yieldMany [1..value]
 sourceF :: F.Feeder Int Identity Identity ()
 sourceF = F.yieldMany [1..value]
 
-sourceI :: I.Enumerator Int Identity a
-sourceI = I.enumList [1..value]
+sourceI :: I.Enumerator [Int] Identity a
+sourceI = I.enumList $ map pure [1..value]
 
 sourceB :: B.Tape Identity Maybe Int
 sourceB = B.tap [1..value]
@@ -88,6 +83,11 @@ scanT :: Monad m => (b -> a -> b) -> b -> T.Tube a b m x
 scanT f = go where
   go b = T.await >>= \x -> let !b' = f b x in T.yield b' >> go b'
 
+scanI :: Monad m => (b -> a -> b) -> b -> I.Enumeratee [a] [b] m x
+scanI f = I.unfoldConvStream (\a0 -> I.liftI $ \case
+  I.Chunk xs -> return $ mapAccumL (\a x -> let !r = f a x in (r, r)) a0 xs
+  I.EOF _ -> return (a0, [a0]))
+
 main = defaultMain
   [ bgroup "scan"
       [ bench "boombox" $ whnf drainB (scanB (+) 0)
@@ -96,9 +96,7 @@ main = defaultMain
       , bench "tubes" $ whnf drainT (scanT (+) 0)
       , bench "feeders" $ whnf drainF (F.scan (+) 0)
       , bench "predators" $ whnf drainPd (Pd.scan (+) 0)
-      , bench "iteratee" $ whnf drainI (I.unfoldConvStream (\x -> I.liftI $ \case
-        I.Chunk i -> let !r = x + i in return (r, r)
-        I.EOF _ -> return (x, x)) 0)
+      , bench "iteratee" $ whnf drainI (scanI (+) 0)
       , bench "machines" $ whnf drainM (M.scan (+) 0)
       , bench "pipes" $ whnf drainP (P.scan (+) 0 id)
       , bench "conduit" $ whnf drainC (CC.scanl (+) 0)
