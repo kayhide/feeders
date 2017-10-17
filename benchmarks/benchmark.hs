@@ -19,6 +19,8 @@ import Control.Arrow
 import Control.Monad
 import Criterion.Main
 import Data.List
+import Data.IORef
+import qualified System.IO.Streams as Is
 
 drainM :: M.ProcessT Identity Int o -> ()
 drainM m = runIdentity $ M.runT_ (sourceM M.~> m)
@@ -50,11 +52,20 @@ drainT h = runIdentity $ T.runTube $ sourceT T.>< h T.>< T.stop
 drainMc :: Mc.ProcessA (->) (Mc.Event Int) a -> ()
 drainMc h = Mc.run_ (h >>> arr (const Mc.noEvent)) [1..value]
 
+drainIs :: (Is.InputStream Int -> IO (Is.InputStream b)) -> IO ()
+drainIs h = do
+  i <- Is.fromList [1..value]
+  i' <- h i
+  o <- Is.nullOutput
+  Is.connect i' o
+
 value :: Int
 value = 10000
 
 sourceM = M.enumerateFromTo 1 value
 sourceC = C.enumFromTo 1 value
+
+sourceP :: Monad m => P.Producer Int m ()
 sourceP = P.each [1..value]
 
 sourcePd :: Pd.Prey Int Identity ()
@@ -88,17 +99,29 @@ scanI f = I.unfoldConvStream (\a0 -> I.liftI $ \case
   I.Chunk xs -> return $ mapAccumL (\a x -> let !r = f a x in (r, r)) a0 xs
   I.EOF _ -> return (a0, [a0]))
 
+scanIs :: (b -> a -> b) -> b -> Is.InputStream a -> IO (Is.InputStream b)
+scanIs f b0 i = do
+  r <- newIORef b0
+  Is.makeInputStream $ Is.read i >>= \case
+    Nothing -> return Nothing
+    Just x -> do
+      b <- readIORef r
+      let !b' = f b x
+      writeIORef r b'
+      return $ Just b'
+
 main = defaultMain
   [ bgroup "scan"
-      [ bench "boombox" $ whnf drainB (scanB (+) 0)
+      [ bench "io-streams" $ whnfIO $ drainIs $ scanIs (+) 0
+      , bench "boombox" $ whnf drainB (scanB (+) 0)
       , bench "machinecell" $ whnf drainMc (Mc.evMap (+) >>> Mc.accum 0)
       , bench "streaming" $ whnf drainS (S.scan (+) 0 id)
-      , bench "tubes" $ whnf drainT (scanT (+) 0)
       , bench "feeders" $ whnf drainF (F.scan (+) 0)
       , bench "predators" $ whnf drainPd (Pd.scan (+) 0)
       , bench "iteratee" $ whnf drainI (scanI (+) 0)
       , bench "machines" $ whnf drainM (M.scan (+) 0)
       , bench "pipes" $ whnf drainP (P.scan (+) 0 id)
       , bench "conduit" $ whnf drainC (CC.scanl (+) 0)
+      , bench "tubes" $ whnf drainT (scanT (+) 0)
       ]
   ]
