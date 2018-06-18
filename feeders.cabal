@@ -28,8 +28,8 @@ benchmark benchmark
     , criterion
     , pipes
     -- , machines
-    -- , conduit
-    -- , conduit-combinators
+    , conduit
+    , conduit-combinators
     -- , feeders
     -- , iteratee
     -- , boombox

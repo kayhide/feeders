@@ -1,6 +1,6 @@
--- import qualified Data.Conduit      as C
--- import qualified Data.Conduit.List as C
--- import qualified Data.Conduit.Combinators as CC
+import qualified Data.Conduit      as C
+import qualified Data.Conduit.List as C
+import qualified Data.Conduit.Combinators as CC
 -- import qualified Data.Feeder       as F
 -- import qualified Data.Predator       as Pd
 -- import qualified Data.Machine      as M
@@ -27,8 +27,8 @@ import Data.IORef
 drainP :: P.Pipe Int a Identity () -> ()
 drainP p = runIdentity $ P.runEffect $ P.for (sourceP P.>-> p) P.discard
 
--- drainC :: C.Conduit Int Identity a -> ()
--- drainC c = runIdentity $ (sourceC C.$= c) C.$$ C.sinkNull
+drainC :: C.Conduit Int Identity a -> ()
+drainC c = runIdentity $ (sourceC C.$= c) C.$$ C.sinkNull
 
 -- drainPd :: Pd.Heterotroph Int Int Identity () -> ()
 -- drainPd h = maybe () fst $ runIdentity $ Pd.prey Pd.sinkNull $ sourcePd Pd.@-> h
@@ -62,7 +62,7 @@ value :: Int
 value = 10000
 
 -- sourceM = M.enumerateFromTo 1 value
--- sourceC = C.enumFromTo 1 value
+sourceC = C.enumFromTo 1 value
 
 sourceP :: Monad m => P.Producer Int m ()
 sourceP = P.each [1..value]
@@ -125,5 +125,6 @@ main = defaultMain
       -- ]
     [ bench "machinecell" $ whnf drainMc (Mc.evMap (+) >>> Mc.accum 0)
     , bench "pipes" $ whnf drainP (P.scan (+) 0 id)
+    , bench "conduit" $ whnf drainC (CC.scanl (+) 0)
     ]
   ]
